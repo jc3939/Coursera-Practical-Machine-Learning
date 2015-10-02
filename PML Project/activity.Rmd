@@ -1,0 +1,94 @@
+---
+title: "Wearable device precision ML analysis"
+author: "James Chen"
+date: "September 27, 2015"
+output: html_document
+---
+
+##Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+#Download the data
+```{r}
+setwd("~/Documents/JHU_Practical_Machine_Learning/PML Project")
+
+library(caret)
+library(kernlab)
+library(randomForest)
+
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+
+if (!file.exists("./data")) {
+  dir.create("./data")
+}
+
+if (!file.exists("./data/pml-training.csv")) {
+  download.file(trainUrl, destfile="./data/pml-training.csv", method="curl")
+}
+
+if (!file.exists("./data/pml-testing.csv")) {
+  download.file(testUrl, destfile="./data/pml-testing.csv", method="curl")
+}
+
+```
+
+#Load data into memory
+```{r}
+trainData <- read.csv("./data/pml-training.csv")
+testData <- read.csv("./data/pml-testing.csv")
+dim(trainData)
+```
+
+As we can tell from the data, there are large amount of columns with NA and many rows missed data, I would like to remove all columns with NA or not populated with numeric values.
+```{r}
+classe <- trainData$classe
+trainData <- trainData[, colSums(is.na(trainData)) == 0]
+testData <- testData[, colSums(is.na(testData)) == 0]
+trainRemove <- grepl("^X|timestamp|window", names(trainData))
+trainData <- trainData[, !trainRemove]
+trainCleaned <- trainData[, sapply(trainData, is.numeric)]
+trainCleaned$classe <- classe
+testRemove <- grepl("^X|timestamp|window", names(testData))
+testData <- testData[, !testRemove]
+testCleaned <- testData[, sapply(testData, is.numeric)]
+```
+
+#Slice the data
+```{r}
+set.seed(20150927) # For reproducibile purpose
+inTrain <- createDataPartition(trainCleaned$classe, p=0.70, list=F)
+trainData <- trainCleaned[inTrain, ]
+testData <- trainCleaned[-inTrain, ]
+```
+
+#Statistical Modeling
+We will use random forest algorithm as it has high accuracy rate and easy to interpret.
+```{r, cache=TRUE}
+controlRf <- trainControl(method="cv", 5)
+if (!"modelRf" %in% ls()){
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=250)
+}
+modelRf
+```
+
+Then, we estimate the performance of the model on the validation data set.
+
+```{r}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+So, the estimated accuracy of the model is 99.41% and the estimated out-of-sample error is 0.59%.
+
+## Predicting for Test Data Set
+Now, we apply the model to the original testing data set downloaded from the data source. We remove the `problem_id` column first.  
+```{r}
+result <- predict(modelRf, testCleaned[, -length(names(testCleaned))])
+result
+```
